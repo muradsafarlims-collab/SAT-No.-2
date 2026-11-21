@@ -314,7 +314,7 @@ function parseAnswerSection(lines){
 }
 function splitBlocks(lines){
   var idx=[],i;
-  for(i=0;i<lines.length;i++){if(/^Question ID\s+[0-9a-f]{5,}/i.test(lines[i].t))idx.push(i);}
+  for(i=0;i<lines.length;i++){if(/^Question ID\s+\S{4,}/i.test(lines[i].t))idx.push(i);}
   var blocks=[];
   if(idx.length>=2){
     idx.forEach(function(s,k){blocks.push({n:null,lines:lines.slice(s,k+1<idx.length?idx[k+1]:lines.length),cb:true});});
@@ -339,11 +339,11 @@ function parseBlock(blk){
   var bl=blk.lines,meta='',start=0,i,t,m;
   if(blk.cb){
     var firstId=-1;
-    for(i=0;i<bl.length;i++){if(/^ID:\s*[0-9a-f]{5,}/i.test(bl[i].t)){firstId=i;break;}}
+    for(i=0;i<bl.length;i++){if(/^[I1l]D:\s*\S{4,}/i.test(bl[i].t)){firstId=i;break;}}
     var metaEnd=firstId>=0?firstId:Math.min(bl.length,8);
     meta=bl.slice(0,metaEnd).map(function(l){return l.t;}).join(' ');
     bl=bl.slice(metaEnd).filter(function(l){
-      return !/^ID:\s*[0-9a-f]{5,}(\s+Answer)?$/i.test(l.t)&&!/^Question ID\b/i.test(l.t);
+      return !/^[I1l]D:\s*\S{4,}(\s+Answer)?$/i.test(l.t)&&!/^Question ID\b/i.test(l.t);
     });
   }
   var stem=[],ch=[],expl=[],ans=null,state='stem';
@@ -621,9 +621,8 @@ function renderImport(){
     h+='<label class="drop" id="drop" tabindex="0"><input type="file" id="pdf" accept="application/pdf,.pdf"><b>Drop your PDF here</b><span class="muted">or tap to choose a file</span></label>';
     if(imp.stage==='reading')h+='<div class="cardx"><b>Reading your PDF…</b><div class="muted small">'+esc(imp.msg)+'</div></div>';
     if(imp.stage==='error')h+='<div class="cardx" style="border-color:var(--bad)"><b style="color:var(--bad)">That did not work</b><p class="muted" style="margin-top:6px">'+esc(imp.msg)+'</p></div>';
-    h+='<details class="paste"><summary>Already have a question set file (.json)?</summary><p class="muted small" style="margin-top:10px">If Claude converted your PDF for you, choose the .json file here.</p><div style="margin-top:10px"><input type="file" id="jsonf" accept=".json,application/json"></div></details>';
-    h+='<details class="paste"><summary>Or paste the text from your PDF</summary><textarea class="big" id="pasteTa" placeholder="Paste questions, answer choices (A. B. C. D.) and the answer key here"></textarea><div style="margin-top:10px"><button class="btn" data-act="parsePaste">Read pasted text</button></div></details>';
-    h+='<div class="cardx"><h3 style="margin-bottom:8px">What the PDF should look like</h3><ul class="muted small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px"><li>Normal text PDFs are read instantly. PDFs made of pictures (scans or screenshots) are read with text recognition, which is slower and can make mistakes, so check the list on the next step.</li><li>Each question has answer choices that start with A., B., C., D.</li><li>Answers can sit under each question (for example "Correct Answer: B" and "Rationale"), or in an answer key at the end ("1. B" followed by the explanation).</li><li>Charts, tables and images are not copied. Questions that rely on them will show only their text.</li></ul><p class="muted small" style="margin-top:10px">If the list on the next step looks wrong, you can fix the answers there. For tricky PDFs, send the file to Claude in the chat and ask it to convert it into a question set.</p></div>';
+    h+='<details class="paste"'+(imp.rawText?' open':'')+'><summary>'+(imp.rawText?'The text the reader found. Fix it if needed, then read it again':'Or paste the text from your PDF')+'</summary><textarea class="big" id="pasteTa" placeholder="Paste questions, answer choices (A. B. C. D.) and the answer key here">'+esc(imp.rawText||'')+'</textarea><div style="margin-top:10px"><button class="btn" data-act="parsePaste">Read pasted text</button></div></details>';
+    h+='<div class="cardx"><h3 style="margin-bottom:8px">What the PDF should look like</h3><ul class="muted small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px"><li>Normal text PDFs are read instantly. PDFs made of pictures (scans or screenshots) are read with text recognition, which is slower and can make mistakes, so check the list on the next step.</li><li>Each question has answer choices that start with A., B., C., D.</li><li>Answers can sit under each question (for example "Correct Answer: B" and "Rationale"), or in an answer key at the end ("1. B" followed by the explanation).</li><li>Charts, tables and images are not copied. Questions that rely on them will show only their text.</li></ul><p class="muted small" style="margin-top:10px">If the list on the next step looks wrong, you can fix the answers there.</p></div>';
   }else{
     var ok=imp.qs.filter(function(q){return q.a>=0;}).length,ex=imp.qs.filter(function(q){return q.x;}).length,hd=imp.qs.some(function(q){return q.d!=='u';});
     h+='<div class="cardx" style="display:flex;flex-direction:column;gap:14px"><div class="row"><span class="chip good">'+imp.qs.length+' questions found</span><span class="chip '+(ok===imp.qs.length?'good':'warn')+'">'+ok+' with answers</span><span class="chip '+(ex===imp.qs.length?'good':'warn')+'">'+ex+' with explanations</span><span class="chip plain">'+(hd?'Difficulty found':'No difficulty labels')+'</span></div>';
@@ -637,16 +636,6 @@ function renderImport(){
   }
   h+='</div>';
   app.innerHTML=h;
-  var jf=document.getElementById('jsonf');
-  if(jf)jf.onchange=function(){
-    var f=jf.files[0];if(!f)return;
-    f.text().then(function(t){
-      var r=importJson(t);
-      if(!r.questions.length){imp={stage:'error',msg:'No questions were found in that file.',qs:[],warn:[]};}
-      else{var noAns=r.questions.filter(function(q){return q.a<0;}).length;imp={stage:'review',qs:r.questions,warn:noAns?[noAns+' question'+(noAns===1?' has':'s have')+' no answer yet. Choose the correct letter in the list below.']:[],name:r.name||f.name.replace(/\.json$/i,''),msg:''};}
-      render();
-    }).catch(function(){imp={stage:'error',msg:'That file could not be read as a question set.',qs:[],warn:[]};render();});
-  };
   var drop=document.getElementById('drop'),inp=document.getElementById('pdf');
   if(inp){
     inp.onchange=function(){if(inp.files[0])handleFile(inp.files[0]);};
@@ -655,15 +644,30 @@ function renderImport(){
     drop.ondrop=function(e){e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0]);};
   }
 }
+function rawToText(raw){
+  var ls=cleanLines(raw),s='';
+  ls.forEach(function(l,i){s+=(i===0?'':(l.p?'\n\n':'\n'))+l.t;});
+  return s;
+}
+function charCount(raw){var n=0;raw.forEach(function(l){n+=String(l.t).replace(/\s/g,'').length;});return n;}
+function fail(msg,raw){imp.stage='error';imp.msg=msg;imp.qs=[];imp.warn=[];imp.rawText=raw?rawToText(raw):'';render();}
 function handleFile(f){
-  if(!/pdf$/i.test(f.name)&&f.type!=='application/pdf'){imp={stage:'error',msg:'Please choose a PDF file.',qs:[],warn:[]};render();return;}
-  if(!window.pdfjsLib){imp={stage:'error',msg:'The PDF reader could not load. Check your internet connection and reload the page, or use "paste the text" below.',qs:[],warn:[]};render();return;}
-  imp={stage:'reading',msg:'Starting…',qs:[],warn:[],name:f.name.replace(/\.pdf$/i,'')};render();
-  extractPdf(f).then(function(raw){
-    var r=parseDocument(raw);
-    if(!r.questions.length){imp.stage='error';imp.msg=r.warn[0];render();return;}
-    imp.stage='review';imp.qs=r.questions;imp.warn=r.warn;render();
-  }).catch(function(e){imp.stage='error';imp.msg='Could not read this PDF ('+(e&&e.message?e.message:'unknown error')+'). Try the paste option instead.';render();});
+  if(!/pdf$/i.test(f.name)&&f.type!=='application/pdf'){fail('Please choose a PDF file.');return;}
+  if(!window.pdfjsLib){fail('The PDF reader could not load. Check your internet connection and reload the page.');return;}
+  imp={stage:'reading',msg:'Opening your PDF\u2026',qs:[],warn:[],name:f.name.replace(/\.pdf$/i,''),rawText:''};render();
+  var used=false;
+  extractPdf(f).then(function(res){
+    used=res.ocr;
+    var r=parseDocument(res.raw);
+    if(r.questions.length||res.ocr)return {r:r,raw:res.raw};
+    setMsg('No questions were found in the PDF text. Trying to read the pages as pictures instead\u2026');
+    return ocrPdf(res.pdf).then(function(raw2){used=true;return {r:parseDocument(raw2),raw:raw2};});
+  }).then(function(o){
+    if(!o.r.questions.length){fail(o.r.warn[0]+' The reader found '+charCount(o.raw)+' characters of text.',o.raw);return;}
+    var warn=o.r.warn.slice();
+    if(used&&o.r.questions.some(function(q){return /completes the text/i.test(q.q)&&!/_{2,}/.test(q.p);}))warn.push('This PDF was read from pictures. Fill-in-the-blank passages may be missing their blank line (_____), so check the passages as you practice.');
+    imp.stage='review';imp.qs=o.r.questions;imp.warn=warn;imp.rawText='';render();
+  }).catch(function(e){fail('Something went wrong while reading the PDF: '+(e&&e.message?e.message:String(e)));});
 }
 function extractPdf(file){
   pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -673,7 +677,7 @@ function extractPdf(file){
     var pages=[],chain=Promise.resolve();
     for(var p=1;p<=pdf.numPages;p++){(function(pn){
       chain=chain.then(function(){
-        setMsg('Page '+pn+' of '+pdf.numPages);
+        setMsg('Checking page '+pn+' of '+pdf.numPages+'\u2026');
         return pdf.getPage(pn).then(function(page){
           var vh=page.getViewport({scale:1}).height;
           return page.getTextContent().then(function(tc){pages.push(pageLines(tc.items,vh));});
@@ -682,48 +686,43 @@ function extractPdf(file){
     })(p);}
     return chain.then(function(){
       var chars=0;pages.forEach(function(pl){pl.forEach(function(l){chars+=l.t.replace(/\s/g,'').length;});});
-      if(chars/pdf.numPages>=120)return mergePages(pages);
-      return ocrPdf(pdf);
+      if(chars/pdf.numPages>=120)return {raw:mergePages(pages),ocr:false,pdf:pdf};
+      return ocrPdf(pdf).then(function(raw){return {raw:raw,ocr:true,pdf:pdf};});
     });
   });
 }
 function setMsg(m){imp.msg=m;var el=document.querySelector('.cardx .muted.small');if(el)el.textContent=m;}
 function ocrPdf(pdf){
-  if(!window.Tesseract)return Promise.reject(new Error('This PDF is made of pictures, and the text reader could not load. Check your internet connection and reload the page.'));
-  setMsg('This PDF is made of pictures, so the page is being read like a scanner would. Preparing…');
-  return Tesseract.createWorker('eng').then(function(worker){
+  if(!window.Tesseract)return Promise.reject(new Error('the picture reader could not load. Check your internet connection and reload the page'));
+  var curPage=0;
+  function logger(m){if(m&&m.status==='recognizing text')setMsg('Reading page '+curPage+' of '+pdf.numPages+' from the picture: '+Math.round(m.progress*100)+'%');}
+  function mk(opts){opts.logger=logger;return Tesseract.createWorker('eng',1,opts);}
+  setMsg('This PDF is made of pictures, so it is read like a scan. Loading the reader (first time only)\u2026');
+  return mk({}).catch(function(){
+    setMsg('Trying another source for the reader\u2026');
+    return mk({langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int'});
+  }).then(function(worker){
     var out=[],chain=Promise.resolve();
     for(var p=1;p<=pdf.numPages;p++){(function(pn){
       chain=chain.then(function(){
-        setMsg('Reading page '+pn+' of '+pdf.numPages+'. Picture PDFs take longer, about 10 to 20 seconds per page.');
+        curPage=pn;setMsg('Reading page '+pn+' of '+pdf.numPages+' from the picture\u2026');
         return pdf.getPage(pn).then(function(page){
           var vp=page.getViewport({scale:2.2}),cv=document.createElement('canvas');
           cv.width=vp.width;cv.height=vp.height;
           return page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise.then(function(){return worker.recognize(cv);});
         }).then(function(res){
+          var prev='',pend=true;
           (res.data.text||'').split('\n').forEach(function(s){
-            out.push({t:s.replace(/^[^A-Za-z0-9("'“_]+\s*/,''),p:s.trim()===''});
+            var t=s.trim();
+            if(!t){pend=/[.?!:"\u201d)]$/.test(prev);return;}
+            out.push({t:t.replace(/^[^A-Za-z0-9("'\u201c_]+\s*/,''),p:pend});pend=false;prev=t;
           });
           out.push({t:'',p:true});
         });
       });
     })(p);}
-    return chain.then(function(){return worker.terminate();}).then(function(){return out;});
+    return chain.then(function(){return worker.terminate();}).then(function(){return out;},function(e){try{worker.terminate();}catch(x){}throw e;});
   });
-}
-function importJson(text){
-  var data=JSON.parse(text),arr=Array.isArray(data)?data:(data.questions||[]),nm=(data&&data.name)||'';
-  var qs=[];
-  arr.forEach(function(r){
-    var o=(r.o||r.options||r.choices||[]).map(String);if(!r.q&&!r.question||o.length<2)return;
-    var a=r.a!==undefined?r.a:(r.answer!==undefined?r.answer:r.correct);
-    if(typeof a==='string'){a=/^[A-Da-d]$/.test(a.trim())?'ABCD'.indexOf(a.trim().toUpperCase()):-1;}
-    if(typeof a!=='number'||a<0||a>=o.length)a=-1;
-    var d=String(r.d||r.difficulty||'u').toLowerCase()[0];if('emh'.indexOf(d)<0)d='u';
-    qs.push({d:d,t:r.t||r.skill||'Practice',p:r.p||r.passage||'',q:r.q||r.question,o:o,a:a,x:r.x||r.explanation||r.rationale||''});
-  });
-  var anyD=qs.some(function(q){return q.d!=='u';});if(anyD)qs.forEach(function(q){if(q.d==='u')q.d='m';});
-  return {name:nm,questions:qs};
 }
 function pageLines(items,vh){
   var rows=[];
