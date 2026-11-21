@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>No. 2 Daily</title>
+<meta name="description" content="Upload a PDF of SAT Reading and Writing questions and practice ten a day in an exam-room style interface, with answers and explanations at the end.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js"></script>
+<style>
+/* Concept: a quiet exam room. The test screens copy the layout of a digital SAT (dashed rules, split passage/question panes, question map);
+   home, import and results get a "test day" treatment: admit-one ticket, pencil yellow, and a bubble answer sheet. */
+:root{
+  color-scheme:light;
+  --bg:#e9ecf2; --paper:#ffffff; --ink:#0d1117; --muted:#566074; --line:#ccd2de; --soft:#f1f3f8;
+  --blue:#1a4fd8; --blue-ink:#ffffff; --blue-soft:#e4ebff;
+  --pencil:#f5c518; --pencil-ink:#2b2100;
+  --flag:#c8341b; --good:#12794a; --good-bg:#dff3e8; --bad:#b3261e; --bad-bg:#fbe6e3; --warn-bg:#fff2cc; --warn:#6b4b00;
+  --sans:'Noto Sans',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+  --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0a0d13; --paper:#141925; --ink:#eef1f8; --muted:#9aa3b8; --line:#2b3347; --soft:#1b2132;
+  --blue:#7a9bff; --blue-ink:#0a0d13; --blue-soft:#1c2a55;
+  --pencil:#f5c518; --pencil-ink:#2b2100;
+  --flag:#ff8264; --good:#5fd197; --good-bg:#10301f; --bad:#ff8a80; --bad-bg:#3a1a18; --warn-bg:#3a2c0c; --warn:#f2c56b;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0a0d13; --paper:#141925; --ink:#eef1f8; --muted:#9aa3b8; --line:#2b3347; --soft:#1b2132;
+  --blue:#7a9bff; --blue-ink:#0a0d13; --blue-soft:#1c2a55;
+  --pencil:#f5c518; --pencil-ink:#2b2100;
+  --flag:#ff8264; --good:#5fd197; --good-bg:#10301f; --bad:#ff8a80; --bad-bg:#3a1a18; --warn-bg:#3a2c0c; --warn:#f2c56b;
+  color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55}
+body.examing{background:var(--paper)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:60}
+body.examing::before{background:var(--paper)}
+h1,h2,h3{margin:0;line-height:1.2;text-wrap:balance}
+p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,a:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,label.drop:focus-within{outline:3px solid var(--blue);outline-offset:2px}
+a{color:var(--blue);font-weight:600;text-underline-offset:3px}
+.pad{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.muted{color:var(--muted)}
+.small{font-size:.875rem}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.link{background:none;border:0;padding:4px 0;color:var(--blue);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.btn{border:2px solid var(--ink);background:var(--paper);border-radius:999px;padding:11px 22px;font-weight:700;min-height:46px}
+.btn:hover{background:var(--soft)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:var(--blue-ink)}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.pen{background:var(--pencil);border-color:var(--ink);color:var(--pencil-ink)}
+.btn.pen:hover{filter:brightness(1.05)}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.btn.big{padding:15px 28px;font-size:1.05rem}
+.chip{display:inline-block;font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-soft);color:var(--blue)}
+.chip.good{background:var(--good-bg);color:var(--good)}
+.chip.bad{background:var(--bad-bg);color:var(--bad)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.plain{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--blue);border-radius:99px}
+.bar.good>i{background:var(--good)}
+.p-wrap{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:20px;padding-block:22px 64px}
+
+/* ---------- Home ---------- */
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.35rem;letter-spacing:-.01em}
+.brand .mk{background:var(--pencil);color:var(--pencil-ink);padding:1px 10px;border-radius:6px;transform:rotate(-2deg);display:inline-block;border:2px solid var(--ink)}
+.ticket{position:relative;display:grid;grid-template-columns:1fr 150px;background:var(--paper);border:2px solid var(--ink);border-radius:18px}
+.ticket::before,.ticket::after{content:"";position:absolute;right:63px;width:26px;height:26px;border-radius:50%;background:var(--bg);border:2px solid var(--ink)}
+.ticket::before{top:-14px;clip-path:inset(50% 0 0 0)}
+.ticket::after{bottom:-14px;clip-path:inset(0 0 50% 0)}
+.t-main{padding:26px 26px 26px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.t-main h2{font-size:1.9rem;letter-spacing:-.02em}
+.t-stub{border-left:2px dashed var(--ink);padding:18px 14px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:10px;text-align:center}
+.t-stub .no{font-size:2.6rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.barcode{width:100%;height:46px;background:repeating-linear-gradient(90deg,var(--ink) 0 2px,transparent 2px 5px,var(--ink) 5px 6px,transparent 6px 9px,var(--ink) 9px 12px,transparent 12px 14px,var(--ink) 14px 15px,transparent 15px 19px)}
+.hi{background:linear-gradient(transparent 55%,var(--pencil) 55% 92%,transparent 92%);padding:0 2px}
+.strip{display:grid;grid-template-columns:repeat(14,1fr);gap:5px}
+.strip i{aspect-ratio:1;border-radius:5px;background:var(--soft);border:1px solid var(--line)}
+.strip i.l1{background:#f7dd7c;border-color:#e0bf3d}.strip i.l2{background:#9fd8b6;border-color:#6bb88b}.strip i.l3{background:#3aa56e;border-color:#2b8a58}
+.strip i.now{outline:2px solid var(--ink);outline-offset:1px}
+.cardx{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:20px;min-width:0}
+.stats{display:flex;gap:28px;flex-wrap:wrap}
+.stats b{display:block;font-size:1.8rem;line-height:1.1;font-variant-numeric:tabular-nums}
+.sets{display:flex;flex-direction:column}
+.set{display:grid;grid-template-columns:1fr auto;gap:8px 14px;align-items:center;padding:14px 0;border-top:1px solid var(--line)}
+.set:first-child{border-top:0}
+.set .nm{font-weight:700;overflow-wrap:anywhere}
+.set .bar{grid-column:1/-1}
+.set.active .nm::before{content:"●";color:var(--blue);margin-right:6px}
+.notice{border:1px dashed var(--line);border-radius:12px;padding:14px 16px;font-size:.875rem;color:var(--muted)}
+
+/* ---------- Import ---------- */
+label.drop{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;border:2px dashed var(--ink);border-radius:16px;padding:34px 18px;background:var(--paper);cursor:pointer}
+label.drop.over{background:var(--blue-soft);border-color:var(--blue)}
+label.drop input{position:absolute;opacity:0;width:1px;height:1px}
+label.drop b{font-size:1.15rem}
+details.paste{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+details.paste summary{cursor:pointer;font-weight:600}
+textarea.big{width:100%;min-height:160px;margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--soft);resize:vertical}
+.pv{display:flex;flex-direction:column}
+.pv-i{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-top:1px solid var(--line)}
+.pv-i:first-child{border-top:0}
+.pv-i .n{font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.pv-i .s{overflow-wrap:anywhere;font-size:.92rem}
+select.ans{border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:6px 8px}
+input.txt{width:100%;border:2px solid var(--ink);border-radius:10px;padding:10px 12px;background:var(--paper)}
+
+/* ---------- Exam chrome ---------- */
+.exam{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--paper);padding-top:env(safe-area-inset-top,0px)}
+.xh{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:var(--paper)}
+.xh-in{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;min-height:68px;padding-block:8px}
+.xh-title{font-weight:700;font-size:1.05rem}
+.xh-c{display:flex;flex-direction:column;align-items:center;gap:3px}
+.timer{font-size:1.25rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.timer.over{color:var(--bad)}
+.pill{border:1.5px solid var(--ink);background:var(--paper);border-radius:999px;padding:1px 14px;font-size:.78rem;font-weight:600}
+.xh-r{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.tool{display:flex;flex-direction:column;align-items:center;gap:1px;background:none;border:0;padding:4px 10px;font-size:.72rem;font-weight:600;border-radius:8px}
+.tool:hover{background:var(--soft)}
+.dash{height:3px;background:repeating-linear-gradient(90deg,var(--ink) 0 22px,transparent 22px 28px);opacity:.85}
+.pop{position:absolute;z-index:40;background:var(--paper);border:2px solid var(--ink);border-radius:12px;padding:16px 18px;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.pop.dir{left:max(16px,env(safe-area-inset-left,0px));top:calc(100% + 6px);width:min(560px,calc(100vw - 32px))}
+.pop.notes{right:max(16px,env(safe-area-inset-right,0px));top:calc(100% + 6px);width:min(360px,calc(100vw - 32px))}
+.pop textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--soft);resize:vertical;margin-top:8px}
+.xm{flex:1;display:grid;grid-template-columns:1fr 1fr;min-height:0}
+.xm.single{grid-template-columns:1fr}
+.pane{padding:26px max(20px,env(safe-area-inset-left,0px)) 40px;min-width:0}
+.pane.passage{border-right:3px solid var(--line);background:var(--paper)}
+.xm.single .qpane{max-width:760px;margin:0 auto;width:100%}
+.passage .ptxt{font-family:var(--serif);font-size:1.12rem;line-height:1.7;max-width:62ch}
+.passage .ptxt p+p{margin-top:1em}
+.qhead{display:flex;align-items:center;gap:12px;background:var(--soft);border-bottom:2px solid var(--ink);margin:-26px -20px 20px;padding:8px 16px;flex-wrap:wrap}
+.xm.single .qhead{margin:0 0 20px;border-radius:6px 6px 0 0}
+.qnum{background:var(--ink);color:var(--paper);font-weight:700;min-width:30px;height:30px;display:grid;place-items:center;border-radius:4px;padding:0 6px;font-variant-numeric:tabular-nums}
+.mark{display:inline-flex;align-items:center;gap:6px;background:none;border:0;font-weight:600;padding:4px 6px;border-radius:6px}
+.mark:hover{background:var(--line)}
+.mark.on{color:var(--flag)}
+.mark.on svg{fill:var(--flag)}
+.abc{margin-left:auto;border:1.5px solid var(--ink);background:var(--paper);border-radius:6px;padding:2px 8px;font-weight:700;font-size:.82rem}
+.abc span{text-decoration:line-through}
+.abc.on{background:var(--blue);border-color:var(--blue);color:var(--blue-ink)}
+.qtext{font-size:1.06rem;max-width:62ch;margin-bottom:18px}
+.choices{display:flex;flex-direction:column;gap:12px}
+.cw{display:flex;gap:8px;align-items:stretch}
+.ch{flex:1;display:flex;gap:14px;align-items:center;text-align:left;background:var(--paper);border:1.5px solid var(--ink);border-radius:10px;padding:12px 14px;min-height:54px;min-width:0}
+.ch:hover{background:var(--soft)}
+.ch .l{flex:none;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font-weight:700;font-size:.88rem}
+.ch .t{overflow-wrap:anywhere}
+.ch.sel{border:3px solid var(--blue);padding:10.5px 12.5px;background:var(--blue-soft)}
+.ch.sel .l{background:var(--blue);border-color:var(--blue);color:var(--blue-ink)}
+.cw.gone .ch .t{text-decoration:line-through;color:var(--muted)}
+.cw.gone .ch{border-style:dashed;border-color:var(--muted)}
+.cw.gone .ch .l{border-color:var(--muted);color:var(--muted);position:relative}
+.cw.gone .ch .l::after{content:"";position:absolute;left:-4px;right:-4px;top:50%;border-top:2px solid var(--muted)}
+.xb{flex:none;width:44px;border:1.5px solid var(--ink);border-radius:10px;background:var(--paper);font-weight:700;font-size:.8rem;display:grid;place-items:center}
+.xb:hover{background:var(--soft)}
+.xf{position:sticky;bottom:0;z-index:30;background:var(--paper);padding-bottom:env(safe-area-inset-bottom,0px)}
+.xf-in{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;min-height:68px;padding-block:8px}
+.xf-l{font-weight:600;font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.xf-c{position:relative;display:flex;justify-content:center}
+.xf-r{display:flex;gap:10px;justify-content:flex-end}
+.qnav{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;background:var(--ink);color:var(--paper);border:0;border-radius:8px;padding:8px 16px;font-weight:700}
+.nbtn{background:var(--blue);color:var(--blue-ink);border:0;border-radius:999px;padding:10px 26px;font-weight:700;min-height:42px}
+.nbtn:hover{filter:brightness(1.1)}
+.nbtn[disabled]{opacity:.4;cursor:not-allowed}
+.navpop{left:50%;bottom:calc(100% + 14px);transform:translateX(-50%);width:min(520px,calc(100vw - 24px))}
+.navpop h3{font-size:1rem;text-align:center;margin-bottom:10px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-size:.8rem;color:var(--muted);margin-bottom:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.gq{position:relative;width:42px;height:42px;border:2px dashed var(--blue);color:var(--blue);background:var(--paper);border-radius:6px;font-weight:700;font-variant-numeric:tabular-nums}
+.gq.done{border-style:solid;background:var(--blue);color:var(--blue-ink)}
+.gq.cur{outline:3px solid var(--ink);outline-offset:2px}
+.gq .fl{position:absolute;top:-9px;right:-7px;color:var(--flag);line-height:0}
+.gq .fl svg{fill:var(--flag)}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;border:2px dashed var(--blue)}
+.sw.s{border-style:solid;background:var(--blue)}
+.navpop .go{display:block;margin:14px auto 0}
+.rv{max-width:760px;margin:0 auto;padding:44px max(20px,env(safe-area-inset-left,0px)) 60px;display:flex;flex-direction:column;gap:20px;text-align:center;flex:1}
+.rv h1{font-size:1.8rem}
+.rvbox{border:2px solid var(--ink);border-radius:14px;padding:22px}
+.modal{position:fixed;inset:0;background:rgba(5,8,14,.55);z-index:70;display:grid;place-items:center;padding:20px}
+.modal .box{background:var(--paper);border:2px solid var(--ink);border-radius:16px;padding:24px;max-width:440px;width:100%;display:flex;flex-direction:column;gap:14px}
+
+/* ---------- Results ---------- */
+.score-hd{display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:center}
+.ring{width:130px;height:130px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--good) calc(var(--p)*1%),var(--line) 0)}
+.ring div{width:104px;height:104px;border-radius:50%;background:var(--paper);display:grid;place-items:center;text-align:center;line-height:1.1}
+.ring b{font-size:2rem;font-variant-numeric:tabular-nums}
+.stamp{display:inline-block;border:3px solid var(--blue);color:var(--blue);font-weight:700;letter-spacing:.14em;padding:2px 12px;border-radius:6px;transform:rotate(-5deg);font-size:.85rem}
+.sheet{display:grid;grid-template-columns:repeat(2,1fr);gap:2px 32px}
+.srow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px dotted var(--line)}
+.srow .sn{width:28px;font-weight:700;font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.bub{width:28px;height:28px;border-radius:50%;border:1.5px solid var(--muted);display:grid;place-items:center;font-size:.72rem;font-weight:600;color:var(--muted)}
+.bub.pick{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.bub.pick.right{background:var(--good);border-color:var(--good);color:#fff}
+.bub.pick.wrong{background:var(--bad);border-color:var(--bad);color:#fff}
+.bub.key{border:2px dashed var(--good);color:var(--good)}
+.srow .res{margin-left:auto;font-size:.8rem;font-weight:700}
+.skills{display:flex;flex-direction:column;gap:12px}
+.skills .sk{display:grid;grid-template-columns:minmax(120px,220px) 1fr 54px;gap:12px;align-items:center;font-size:.9rem}
+.tabs{display:flex;gap:8px}
+.tab{border:1.5px solid var(--ink);background:var(--paper);border-radius:999px;padding:7px 16px;font-weight:700;font-size:.9rem}
+.tab.on{background:var(--ink);color:var(--paper)}
+.rq{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.rq .ptxt{font-family:var(--serif);font-size:1.05rem;line-height:1.65;border-left:3px solid var(--line);padding-left:14px;max-width:65ch}
+.rq .ptxt p+p{margin-top:.8em}
+.ro{display:flex;gap:12px;align-items:flex-start;border:2px solid var(--line);border-radius:10px;padding:10px 14px}
+.ro .l{flex:none;width:28px;height:28px;border-radius:50%;border:1.5px solid var(--muted);display:grid;place-items:center;font-weight:700;font-size:.82rem}
+.ro.ok{border-color:var(--good);background:var(--good-bg)}
+.ro.ok .l{background:var(--good);border-color:var(--good);color:#fff}
+.ro.no{border-color:var(--bad);background:var(--bad-bg)}
+.ro.no .l{background:var(--bad);border-color:var(--bad);color:#fff}
+.expl{background:var(--blue-soft);border-radius:10px;padding:14px 16px;font-size:.95rem}
+.expl b{color:var(--blue)}
+.expl p+p{margin-top:.6em}
+@media (max-width:860px){
+  .xm{grid-template-columns:1fr}
+  .pane.passage{border-right:0;border-bottom:3px solid var(--line)}
+  .qhead{margin:-26px -20px 20px}
+}
+@media (max-width:640px){
+  .xh-in{grid-template-columns:1fr auto;}
+  .xh-r{grid-column:1/-1;justify-content:flex-start;order:3;margin-top:-4px}
+  .xf-in{grid-template-columns:auto 1fr;}
+  .xf-l{display:none}
+  .xf-c{justify-content:flex-start}
+  .ticket{grid-template-columns:1fr}
+  .ticket::before,.ticket::after{display:none}
+  .t-stub{border-left:0;border-top:2px dashed var(--ink);flex-direction:row}
+  .t-stub .barcode{width:120px}
+  .score-hd{grid-template-columns:1fr;justify-items:start}
+  .sheet{grid-template-columns:1fr}
+  .skills .sk{grid-template-columns:1fr 54px}
+  .skills .sk .bar{grid-column:1/-1;order:3}
+  .t-main{padding:20px}
+  .t-main h2{font-size:1.6rem}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/*PARSER-START*/
+/* ---------- PDF text to questions ---------- */
+function cleanLines(raw){
+  var out=[],carry=false;
+  raw.forEach(function(l){
+    var t=String(l.t).replace(/[   ]/g,' ').replace(/\s+/g,' ').trim();
+    if(!t){carry=carry||!!l.p;return;}
+    out.push({t:t,p:!!(l.p||carry)});carry=false;
+  });
+  return out;
+}
+var CHOICE=/^\(?([A-D])[.)]\s*(.*)$/;
+var ENTRY1=/^(?:Q(?:uestion)?\s*)?(\d{1,3})\s*[.):\-–—]+\s*(?:(?:correct\s+)?answer\s*:?\s*)?\(?([A-D])\)?(?![A-Za-z])[\s.:\-–—]*(.*)$/i;
+var ENTRY2=/^(\d{1,3})\s+([A-D])\s*$/;
+var ANSHEAD=/^(?:answer\s*key|answers?(?:\s*(?:and|&)\s*(?:rationales?|explanations?))?|answer\s*(?:explanations?|rationales?)|explanations?|rationales?|solutions?)\s*:?$/i;
+function splitChoices(t){
+  var parts=t.split(/\s+(?=[A-D][.)]\s)/);
+  if(parts.length<2||!/^\(?A[.)]/.test(parts[0]))return [t];
+  for(var i=0;i<parts.length;i++){if(!new RegExp('^\\(?'+'ABCD'[i]+'[.)]').test(parts[i]))return [t];}
+  return parts;
+}
+function joinParas(items){
+  var out='';
+  items.forEach(function(l,i){out+=(i===0?'':(l.p?'\n\n':' '))+l.t;});
+  return out.trim();
+}
+function findAnswerSection(lines){
+  for(var i=3;i<lines.length;i++){
+    if(!ANSHEAD.test(lines[i].t))continue;
+    var hits=0;
+    for(var j=i+1;j<Math.min(lines.length,i+10);j++){
+      if(ENTRY1.test(lines[j].t)||ENTRY2.test(lines[j].t))hits++;
+      else if(/^(?:Question\s*)?\d{1,3}[.):]?$/i.test(lines[j].t)&&lines[j+1]&&/^(?:Correct\s+)?Answer\s*:?\s*\(?[A-D]/i.test(lines[j+1].t))hits++;
+    }
+    if(hits>=2)return i;
+  }
+  return -1;
+}
+function parseAnswerSection(lines){
+  var map={},cur=null;
+  for(var i=0;i<lines.length;i++){
+    var t=lines[i].t,m,m2;
+    if((m=t.match(/^(?:Question\s*)?(\d{1,3})[.):]?$/i))&&lines[i+1]&&(m2=lines[i+1].t.match(/^(?:Correct\s+)?Answer\s*:?\s*\(?([A-D])\)?(?![A-Za-z])[\s.:\-–—]*(.*)$/i))){
+      cur={n:+m[1],a:m2[1].toUpperCase(),x:[]};map[cur.n]=cur;
+      if(m2[2])cur.x.push({t:m2[2],p:false});
+      i++;continue;
+    }
+    if((m=t.match(ENTRY1))||(m=t.match(ENTRY2))){
+      cur={n:+m[1],a:m[2].toUpperCase(),x:[]};map[cur.n]=cur;
+      if(m[3]&&m[3].trim())cur.x.push({t:m[3],p:lines[i].p});
+      continue;
+    }
+    if(cur)cur.x.push(lines[i]);
+  }
+  Object.keys(map).forEach(function(k){
+    var e=map[k];
+    var s=joinParas(e.x).replace(/^(?:Rationale|Explanation)\s*:?\s*/i,'');
+    e.x=s;
+  });
+  return map;
+}
+function splitBlocks(lines){
+  var idx=[],i;
+  for(i=0;i<lines.length;i++){if(/^Question ID\s+\S{4,}/i.test(lines[i].t))idx.push(i);}
+  var blocks=[];
+  if(idx.length>=2){
+    idx.forEach(function(s,k){blocks.push({n:null,lines:lines.slice(s,k+1<idx.length?idx[k+1]:lines.length),cb:true});});
+    return blocks;
+  }
+  var cand=[],expect=1;
+  for(i=0;i<lines.length;i++){
+    var m=lines[i].t.match(/^(?:Question\s*)?(\d{1,3})\s*[.):]\s*(.*)$/i)||lines[i].t.match(/^Question\s+(\d{1,3})\s*$/i);
+    if(m&&+m[1]===expect){cand.push({i:i,n:+m[1],rest:m[2]||''});expect++;}
+  }
+  if(cand.length<1)return [];
+  cand.forEach(function(c,k){
+    var end=k+1<cand.length?cand[k+1].i:lines.length;
+    var ls=lines.slice(c.i,end);
+    ls[0]={t:c.rest,p:true};
+    if(!c.rest)ls.shift();
+    blocks.push({n:c.n,lines:ls,cb:false});
+  });
+  return blocks;
+}
+function parseBlock(blk){
+  var bl=blk.lines,meta='',start=0,i,t,m;
+  if(blk.cb){
+    var firstId=-1;
+    for(i=0;i<bl.length;i++){if(/^[I1l]D:\s*\S{4,}/i.test(bl[i].t)){firstId=i;break;}}
+    var metaEnd=firstId>=0?firstId:Math.min(bl.length,8);
+    meta=bl.slice(0,metaEnd).map(function(l){return l.t;}).join(' ');
+    bl=bl.slice(metaEnd).filter(function(l){
+      return !/^[I1l]D:\s*\S{4,}(\s+Answer)?$/i.test(l.t)&&!/^Question ID\b/i.test(l.t);
+    });
+  }
+  var stem=[],ch=[],expl=[],ans=null,state='stem';
+  for(i=0;i<bl.length;i++){
+    var L=bl[i];t=L.t;
+    if(state==='expl'){
+      if(/^Rationale\s*:?$/i.test(t))continue;
+      expl.push(L);continue;
+    }
+    if(ch.length>=2){
+      if((m=t.match(/^(?:Correct\s+)?Answer\s*:?\s*\(?([A-D])\)?(?![A-Za-z])\s*[.:\-–—]*\s*(.*)$/i))){
+        ans=m[1].toUpperCase();state='expl';
+        var r=m[2].replace(/^(?:Rationale|Explanation)\s*:?\s*/i,'');if(r)expl.push({t:r,p:false});continue;
+      }
+      if((m=t.match(/^(?:Rationale|Explanation)\s*:?\s*(.*)$/i))){state='expl';if(m[1])expl.push({t:m[1],p:false});continue;}
+    }
+    var parts=splitChoices(t);
+    for(var k=0;k<parts.length;k++){
+      var part=parts[k],cm=part.match(CHOICE),want='ABCD'[ch.length];
+      if(cm&&cm[1]===want&&ch.length<4){ch.push(cm[2]);state='choices';}
+      else if(state==='choices'){ch[ch.length-1]+=' '+part;}
+      else stem.push({t:part,p:k===0?L.p:false});
+    }
+  }
+  if(ch.length<3)return null;
+  var stemParas=[];
+  stem.forEach(function(l,j){if(j===0||l.p)stemParas.push([l.t]);else stemParas[stemParas.length-1].push(l.t);});
+  stemParas=stemParas.map(function(a){return a.join(' ').trim();}).filter(Boolean);
+  var p='',q='';
+  if(stemParas.length>=2){q=stemParas[stemParas.length-1];p=stemParas.slice(0,-1).join('\n\n');}
+  else if(stemParas.length===1){
+    var s=stemParas[0],re=/(?:^|[.!?”"]\s+)(Which choice|Which of the following|Which finding|Which statement|Which quotation|Which sentence|Which\b|What is|What does|What\b|Based on the|According to the|As used in|How does|Why does|The student wants)/g,mm,last=-1;
+    while((mm=re.exec(s))){last=mm.index+mm[0].length-mm[1].length;}
+    if(last>0){p=s.slice(0,last).trim();q=s.slice(last).trim();}else{q=s;}
+  }
+  q=q.replace(/^(?:Question\s*)?\d{1,3}\s*[.)]\s+/i,'');
+  var d=null,skill='';
+  if(meta){
+    var dm=meta.match(/Difficulty\s*:?\s*(Easy|Medium|Hard)/i);
+    if(dm)d=dm[1][0].toLowerCase();
+    else{var dots=meta.match(/Difficulty\s*:?\s*([●○•◦⬤◯ ]{3,})/);
+      if(dots){var cnt=(dots[1].match(/[●•⬤]/g)||[]).length;d=cnt<=1?'e':cnt===2?'m':'h';}}
+    var sk=meta.match(/Skill\s*:?\s*(.+?)\s*(?:Difficulty|$)/i);if(sk)skill=sk[1].trim();
+    if(!skill){var dom=meta.match(/Domain\s*:?\s*(.+?)\s*(?:Skill|Difficulty|$)/i);if(dom)skill=dom[1].trim();}
+  }
+  return {d:d||'u',t:skill||'Practice',p:p,q:q,o:ch.map(function(c){return c.trim();}),a:ans?'ABCD'.indexOf(ans):-1,x:joinParas(expl).replace(/^(?:Rationale|Explanation)\s*:?\s*/i,'')};
+}
+function parseDocument(raw){
+  var lines=cleanLines(raw),warn=[];
+  var as=findAnswerSection(lines);
+  var qLines=as>=0?lines.slice(0,as):lines;
+  var amap=as>=0?parseAnswerSection(lines.slice(as+1)):{};
+  var blocks=splitBlocks(qLines);
+  if(!blocks.length)return {questions:[],warn:['No questions were found. The questions may not be numbered, or the picture text could not be read clearly. See the tips below.']};
+  var qs=[],skipped=0,anyD=false;
+  blocks.forEach(function(b,i){
+    var q=parseBlock(b);
+    if(!q){skipped++;return;}
+    var n=b.n||(i+1),e=amap[n];
+    if(e){if(q.a<0)q.a='ABCD'.indexOf(e.a);if(!q.x)q.x=e.x||'';}
+    if(q.d!=='u')anyD=true;
+    qs.push(q);
+  });
+  if(anyD)qs.forEach(function(q){if(q.d==='u')q.d='m';});
+  if(skipped)warn.push(skipped+' block'+(skipped===1?'':'s')+' could not be read as a question with answer choices and was skipped.');
+  var noAns=qs.filter(function(q){return q.a<0;}).length;
+  if(noAns)warn.push(noAns+' question'+(noAns===1?' has':'s have')+' no answer yet. Choose the correct letter in the list below.');
+  var noX=qs.filter(function(q){return !q.x;}).length;
+  if(noX&&qs.length)warn.push(noX+' question'+(noX===1?' has':'s have')+' no explanation in the PDF.');
+  return {questions:qs,warn:warn};
+}
+/*PARSER-END*/
+
+/* ---------- Sample set ---------- */
+function Q(d,t,p,q,o,a,x){return {d:d,t:t,p:p,q:q,o:o,a:a,x:x};}
+var WIC='Which choice completes the text with the most logical and precise word or phrase?';
+var TR='Which choice completes the text with the most logical transition?';
+var SE='Which choice completes the text so that it conforms to the conventions of Standard English?';
+var DEMO=[
+Q('e','Words in Context',"The scientist's explanation was so _____ that even the youngest students in the room could follow every step.",WIC,['convoluted','lucid','vague','elaborate'],1,'"Even the youngest students could follow" tells you the explanation was easy to understand. Lucid means clear. Convoluted and vague mean the opposite.'),
+Q('e','Transitions','Maya studied for weeks before the exam. _____ she felt confident when she walked into the room.',TR,['However,','As a result,','For instance,','Meanwhile,'],1,'Weeks of studying is the cause and feeling confident is the effect, so the transition signals cause and effect: As a result.'),
+Q('e','Form, Structure, Sense','The collection of rare stamps _____ displayed in the lobby.',SE,['are','is','were','have been'],1,'The subject is "collection," which is singular. "Of rare stamps" is only a modifier, so the verb is singular: is.'),
+Q('e','Central Ideas','Honeybees communicate the location of food through a "waggle dance." The angle of the dance relative to vertical indicates direction in relation to the sun, and its duration signals distance.','Which choice best states the main idea of the text?',['Honeybees dance mainly for entertainment.','Honeybees use a dance to share information about where food is.','Honeybees always travel toward the sun.','Honeybees dance only at night.'],1,'The text explains that the dance carries direction and distance, so the main idea is that bees use it to share where food is.'),
+Q('e','Inferences','Every spring, the river floods the valley, depositing nutrient-rich silt on the fields. Farmers there have grown wheat for centuries without needing much fertilizer.','Which choice most logically completes the text?',['The silt left by the floods helps keep the soil fertile.','The farmers dislike the spring floods.','Wheat can grow only in valleys.','Fertilizer is not allowed in the region.'],0,'Floods leave nutrient-rich silt and farmers need little fertilizer, so the silt is keeping the soil fertile.'),
+Q('e','Form, Structure, Sense','By the time the bus arrived, we _____ for over an hour.',SE,['wait','waited','had been waiting','are waiting'],2,'"By the time the bus arrived" marks a point in the past. An action that had been going on before it takes the past perfect continuous: had been waiting.'),
+Q('e','Transitions','The first prototype was too heavy to carry. _____ the engineers redesigned it using lighter materials.',TR,['Nevertheless,','Consequently,','Likewise,','In contrast,'],1,'The prototype was too heavy (cause), so the engineers redesigned it (effect). Consequently means as a result.'),
+Q('e','Central Ideas','Urban green spaces do more than beautify cities. Studies show that parks lower summer temperatures, absorb stormwater, and give residents places to exercise and gather.','Which choice best states the main idea of the text?',['Parks are more expensive than they appear.','Parks provide several practical benefits to cities.','Cities should avoid building parks.','Summers are getting hotter everywhere.'],1,'The text lists several benefits: cooler temperatures, stormwater control, and places to exercise and gather.'),
+Q('m','Words in Context',"Despite the critics' _____ review, the film became a box-office success.",WIC,['glowing','scathing','enthusiastic','neutral'],1,'"Despite" signals a contrast. The film succeeded, so the review was negative. Scathing means harshly critical.'),
+Q('m','Boundaries','The experiment failed _____ nevertheless, the team learned valuable lessons from it.',SE,['failed,','failed;','failed:','failed'],1,'There are two independent clauses. "Nevertheless" is a transition adverb, not a conjunction, so the clauses are joined with a semicolon. A comma alone would be a comma splice.'),
+Q('m','Command of Evidence','A researcher claims that remote work can increase worker productivity.','Which finding, if true, would most directly support the researcher\'s claim?',['A survey found that 70% of employees say they prefer working remotely.','A study of 500 call-center employees found that those working from home completed 13% more calls than office-based coworkers.','Companies spent more on laptops last year than the year before.','Average commute times have risen in many cities.'],1,'The claim is about productivity. Only the measured performance gain (13% more calls) directly supports it. A preference survey does not measure productivity.'),
+Q('m','Form, Structure, Sense','Neither the director nor the actors _____ satisfied with the first rehearsal.',SE,['was','were','is','has been'],1,'With "neither ... nor," the verb agrees with the closer subject, "actors," which is plural: were.'),
+Q('h','Words in Context',"The senator's speech was widely regarded as _____: it offered ringing phrases but not a single concrete proposal.",WIC,['pragmatic','vacuous','meticulous','conciliatory'],1,'Lofty phrases with no substance are vacuous, which means empty. Pragmatic would mean the opposite.'),
+Q('h','Inferences','Economists once assumed that consumers weigh gains and losses symmetrically. Experiments, however, revealed that a loss of a given size typically feels more painful than an equivalent gain feels pleasurable, a pattern now called loss aversion.','Which behavior would be most consistent with loss aversion?',['A person is equally happy winning $50 as unhappy losing $50.','A person declines a coin flip that would win $100 or lose $100.','A person buys a lottery ticket every week.','A person saves more when interest rates rise.'],1,'Turning down an even bet shows that the possible loss weighs more than the equal possible gain. Choice A describes the old symmetric assumption.')
+];
+
+/* ---------- State ---------- */
+var KEY='no2-daily-v1';
+function demoBank(){return {id:'demo',name:'Sample set (14 questions)',demo:true,qs:DEMO,days:[]};}
+function load(){
+  try{var s=JSON.parse(localStorage.getItem(KEY));if(s&&s.banks)return s;}catch(e){}
+  return {banks:[demoBank()],active:'demo'};
+}
+var S=load();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function B(){return S.banks.filter(function(b){return b.id===S.active;})[0]||S.banks[0]||null;}
+var view={name:'home'};
+var imp={stage:'idle',qs:[],warn:[],name:'',msg:''};
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function paras(s){return String(s).split(/\n\n+/).map(function(p){return '<p>'+esc(p).replace(/\n/g,'<br>')+'</p>';}).join('');}
+function ds(x){return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
+function today(){return ds(new Date());}
+function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function fmt(s){s=Math.max(0,s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+var DN={e:'Easy',m:'Medium',h:'Hard',u:''};
+var PER=10;
+
+function usedIdx(b){var u={};b.days.forEach(function(d){d.qids.forEach(function(i){u[i]=1;});});return u;}
+function leftCount(b){var u=usedIdx(b);return b.qs.filter(function(q,i){return !u[i];}).length;}
+function buildSet(b){
+  var u=usedIdx(b),idx=[];b.qs.forEach(function(q,i){if(!u[i])idx.push(i);});
+  var hasD=b.qs.some(function(q){return q.d!=='u';});
+  if(!hasD)return idx.slice(0,PER);
+  var by={e:[],m:[],h:[]};idx.forEach(function(i){var d=b.qs[i].d;by[d==='u'?'m':d].push(i);});
+  by.e=shuffle(by.e);by.m=shuffle(by.m);by.h=shuffle(by.h);
+  var out=[];
+  if(by.e.length){
+    out=by.e.slice(0,8);
+    var mix=by.m.slice(0,2),need=PER-out.length-mix.length;
+    if(need>0){var more=by.m.slice(mix.length,mix.length+need);mix=mix.concat(more);need-=more.length;}
+    if(need>0)mix=mix.concat(by.h.slice(0,need));
+    mix.forEach(function(q,i){out.splice(Math.min(out.length,3+i*4),0,q);});
+  }else if(by.m.length){
+    out=by.m.slice(0,PER);
+    if(out.length<PER)out=out.concat(by.h.slice(0,PER-out.length));
+  }else out=by.h.slice(0,PER);
+  return out;
+}
+function phase(b){
+  var u=usedIdx(b),c={e:0,m:0,h:0},hasD=b.qs.some(function(q){return q.d!=='u';});
+  b.qs.forEach(function(q,i){if(!u[i])c[q.d==='u'?'m':q.d]++;});
+  if(!hasD)return {n:'In order',note:'Questions come in the order they appear in your PDF'};
+  if(c.e>0)return {n:'Easy phase',note:'Mostly easy, with a couple of medium questions mixed in'};
+  if(c.m>0)return {n:'Medium phase',note:'Medium questions'};
+  if(c.h>0)return {n:'Hard phase',note:'Hard questions'};
+  return {n:'Finished',note:'You have worked through every question'};
+}
+function newDay(b){
+  var ids=buildSet(b);if(!ids.length)return false;
+  b.days.push({n:b.days.length+1,qids:ids,ans:{},flag:{},strike:{},notes:{},elapsed:0,done:false,score:0,total:0,date:null});
+  save();return true;
+}
+function lastDay(b){return b&&b.days.length?b.days[b.days.length-1]:null;}
+function allDone(){var a=[];S.banks.forEach(function(b){b.days.forEach(function(d){if(d.done&&d.date)a.push(d);});});return a;}
+function streak(){
+  var set={};allDone().forEach(function(d){set[d.date]=1;});
+  var c=0,d=new Date();if(!set[ds(d)])d.setDate(d.getDate()-1);
+  while(set[ds(d)]){c++;d.setDate(d.getDate()-1);}return c;
+}
+function gradeDay(b,day){
+  var sc=0,tot=0;
+  day.qids.forEach(function(i){var q=b.qs[i];if(q.a>=0){tot++;if(day.ans[i]===q.a)sc++;}});
+  day.score=sc;day.total=tot;
+}
+
+/* ---------- Icons ---------- */
+var IC={
+ flag:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 21V4"/><path d="M6 5h11l-2.5 4L17 13H6"/></svg>',
+ up:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
+ down:'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+ pencil:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1L19 8l-3-3L5 16z"/><path d="M14 7l3 3"/></svg>',
+ exit:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4H5v16h5"/><path d="M15 8l4 4-4 4"/><path d="M19 12H9"/></svg>',
+ clock:'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
+};
+
+/* ---------- Timer ---------- */
+var tmr=null;
+function stopTimer(){if(tmr){clearInterval(tmr);tmr=null;}}
+function tick(){
+  var el=document.getElementById('timer');if(!el)return;
+  var b=B(),day=b.days[view.di];if(!day)return;
+  var left=day.qids.length*72-(day.elapsed||0);
+  el.textContent=left>=0?fmt(left):'+'+fmt(-left);
+  el.classList.toggle('over',left<0);
+}
+function startTimer(){
+  stopTimer();tick();
+  tmr=setInterval(function(){
+    if(document.hidden)return;
+    var b=B(),day=b&&b.days[view.di];if(!day||day.done)return;
+    day.elapsed=(day.elapsed||0)+1;if(day.elapsed%5===0)save();tick();
+  },1000);
+}
+
+/* ---------- Render ---------- */
+var app=document.getElementById('app');
+function render(keep){
+  var sy=window.scrollY,ps=[].map.call(document.querySelectorAll('.pane'),function(e){return e.scrollTop;});
+  stopTimer();
+  var ex=view.name==='exam'||view.name==='review';
+  document.body.className=ex?'examing':'';
+  ({home:renderHome,imp:renderImport,exam:renderExam,review:renderReview,results:renderResults})[view.name]();
+  if(ex)startTimer();
+  if(keep){window.scrollTo(0,sy);var np=document.querySelectorAll('.pane');ps.forEach(function(v,i){if(np[i])np[i].scrollTop=v;});}
+  else window.scrollTo(0,0);
+}
+
+function heat(){
+  var map={};allDone().forEach(function(d){var a=d.total?d.score/d.total:0;var l=a>=.8?3:a>=.5?2:1;map[d.date]=Math.max(map[d.date]||0,l);});
+  var h='',d=new Date();d.setDate(d.getDate()-27);
+  for(var i=0;i<28;i++){var k=ds(d);h+='<i class="'+(map[k]?'l'+map[k]:'')+(k===today()?' now':'')+'" title="'+k+'"></i>';d.setDate(d.getDate()+1);}
+  return '<div class="strip" aria-label="Last 28 days of practice">'+h+'</div>';
+}
+
+function renderHome(){
+  var b=B(),t=today(),h='<div class="p-wrap pad">';
+  h+='<header class="row between"><div class="brand"><span class="mk">No. 2</span><span>Daily</span></div><button class="btn" data-act="goImport">Add PDF</button></header>';
+  if(b){
+    var ld=lastDay(b),ph=phase(b),n=ld?ld.n:0;
+    h+='<section class="ticket" aria-label="Today\'s session"><div class="t-main">';
+    if(!ld||(ld.done&&ld.date!==t)){
+      n=ld?ld.n+1:1;
+      if(leftCount(b)>0){
+        h+='<div class="row"><span class="chip">'+esc(ph.n)+'</span><span class="muted small">'+esc(ph.note)+'</span></div>';
+        h+='<h2>Day '+n+': your <span class="hi">10 questions</span></h2><p class="muted">About 12 minutes. You will see the answers and explanations after the last question.</p>';
+        h+='<div><button class="btn pen big" data-act="start">Start Day '+n+'</button></div>';
+      }else{
+        h+='<h2>Set complete</h2><p class="muted">You have worked through every question in this set. Add another PDF to keep going, or review earlier days below.</p><div><button class="btn pen big" data-act="goImport">Add a PDF</button></div>';
+      }
+    }else if(!ld.done){
+      var an=Object.keys(ld.ans).length;
+      h+='<div class="row"><span class="chip">Day '+ld.n+'</span><span class="muted small">'+an+' of '+ld.qids.length+' answered</span></div>';
+      h+='<h2>'+(an||ld.elapsed>5?'Pick up where you left off':'Your <span class="hi">10 questions</span> are ready')+'</h2>';
+      h+='<div class="bar"><i style="width:'+Math.round(an/ld.qids.length*100)+'%"></i></div>';
+      h+='<div><button class="btn pen big" data-act="resume">'+(an?'Continue':'Start')+'</button></div>';
+    }else{
+      h+='<div class="row"><span class="chip good">Done for today</span></div>';
+      h+='<h2>Day '+ld.n+': '+ld.score+' of '+ld.total+' correct</h2><p class="muted">A new set unlocks tomorrow. Look over today\'s answers and explanations now.</p>';
+      h+='<div class="row"><button class="btn pen" data-act="viewRes" data-di="'+(b.days.length-1)+'">Answers and explanations</button>'+(leftCount(b)>0?'<button class="link" data-act="unlock">Unlock the next set now</button>':'')+'</div>';
+    }
+    h+='</div><div class="t-stub"><div class="eyebrow">Admit one</div><div class="no">'+String(n||1).padStart(2,'0')+'</div><div class="barcode" aria-hidden="true"></div></div></section>';
+  }else{
+    h+='<section class="cardx"><h2>Add your questions</h2><p class="muted" style="margin:8px 0 14px">Upload a PDF of questions and answers to get started.</p><button class="btn pen big" data-act="goImport">Add a PDF</button></section>';
+  }
+  var done=allDone(),tot=0,cor=0;done.forEach(function(d){tot+=d.total;cor+=d.score;});
+  h+='<section class="cardx" style="display:flex;flex-direction:column;gap:16px"><div class="stats"><div><b>'+streak()+'</b><span class="muted small">day streak</span></div><div><b>'+done.length+'</b><span class="muted small">days completed</span></div><div><b>'+(tot?Math.round(cor/tot*100)+'%':'–')+'</b><span class="muted small">accuracy</span></div></div>'+heat()+'<div class="muted small">Last 4 weeks. Darker squares mean a higher score.</div></section>';
+  h+='<section class="cardx"><h2 style="margin-bottom:6px">Your question sets</h2><div class="sets">';
+  S.banks.forEach(function(x){
+    var u=usedIdx(x),used=0;Object.keys(u).forEach(function(){used++;});
+    var days=x.days.filter(function(d){return d.done;});
+    h+='<div class="set'+(b&&x.id===b.id?' active':'')+'"><div><div class="nm">'+esc(x.name)+'</div><div class="muted small">'+x.qs.length+' questions · '+used+' used · '+days.length+' day'+(days.length===1?'':'s')+' done</div></div><div class="row">';
+    if(!(b&&x.id===b.id))h+='<button class="btn" data-act="useSet" data-id="'+esc(x.id)+'">Use</button>';
+    if(view.rm===x.id)h+='<span class="small">Remove this set and its progress?</span><button class="btn" data-act="rmYes" data-id="'+esc(x.id)+'">Remove</button><button class="link" data-act="rmNo">Cancel</button>';
+    else h+='<button class="link" data-act="rm" data-id="'+esc(x.id)+'">Remove</button>';
+    h+='</div>'+bar2(used,x.qs.length)+'</div>';
+  });
+  h+='</div></section>';
+  var past=[];S.banks.forEach(function(x,bi){x.days.forEach(function(d,di){if(d.done)past.push({b:x,bi:bi,d:d,di:di});});});
+  if(past.length){
+    past.sort(function(a,c){return (c.d.date||'')<(a.d.date||'')?-1:1;});
+    h+='<section class="cardx"><h2 style="margin-bottom:6px">Past days</h2><div class="sets">';
+    past.slice(0,20).forEach(function(p){h+='<div class="set"><div><div class="nm">Day '+p.d.n+' · '+p.d.score+' / '+p.d.total+'</div><div class="muted small">'+esc(p.b.name)+' · '+esc(p.d.date||'')+'</div></div><button class="btn" data-act="viewRes" data-bi="'+p.bi+'" data-di="'+p.di+'">Review</button></div>';});
+    h+='</div></section>';
+  }
+  h+='<div class="notice">No. 2 Daily is an unofficial practice tool. It is not affiliated with or endorsed by the College Board. Your PDFs are read inside your browser and are never uploaded. Progress is saved in this browser only.</div></div>';
+  app.innerHTML=h;
+}
+function bar2(a,b){return '<div class="bar"><i style="width:'+(b?Math.round(a/b*100):0)+'%"></i></div>';}
+
+/* ---------- Import ---------- */
+function renderImport(){
+  var h='<div class="p-wrap pad"><header class="row between"><button class="link" data-act="home" style="text-decoration:none">← Back</button><div class="brand"><span class="mk">No. 2</span><span>Daily</span></div></header>';
+  h+='<div><h1>Add your questions</h1><p class="muted" style="margin-top:6px">Upload the PDF that has your questions together with the answers. The questions are asked first, and the answers and explanations appear after you finish.</p></div>';
+  if(imp.stage!=='review'){
+    h+='<label class="drop" id="drop" tabindex="0"><input type="file" id="pdf" accept="application/pdf,.pdf"><b>Drop your PDF here</b><span class="muted">or tap to choose a file</span></label>';
+    if(imp.stage==='reading')h+='<div class="cardx"><b>Reading your PDF…</b><div class="muted small">'+esc(imp.msg)+'</div></div>';
+    if(imp.stage==='error')h+='<div class="cardx" style="border-color:var(--bad)"><b style="color:var(--bad)">That did not work</b><p class="muted" style="margin-top:6px">'+esc(imp.msg)+'</p></div>';
+    h+='<details class="paste"'+(imp.rawText?' open':'')+'><summary>'+(imp.rawText?'The text the reader found. Fix it if needed, then read it again':'Or paste the text from your PDF')+'</summary><textarea class="big" id="pasteTa" placeholder="Paste questions, answer choices (A. B. C. D.) and the answer key here">'+esc(imp.rawText||'')+'</textarea><div style="margin-top:10px"><button class="btn" data-act="parsePaste">Read pasted text</button></div></details>';
+    h+='<div class="cardx"><h3 style="margin-bottom:8px">What the PDF should look like</h3><ul class="muted small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px"><li>Normal text PDFs are read instantly. PDFs made of pictures (scans or screenshots) are read with text recognition, which is slower and can make mistakes, so check the list on the next step.</li><li>Each question has answer choices that start with A., B., C., D.</li><li>Answers can sit under each question (for example "Correct Answer: B" and "Rationale"), or in an answer key at the end ("1. B" followed by the explanation).</li><li>Charts, tables and images are not copied. Questions that rely on them will show only their text.</li></ul><p class="muted small" style="margin-top:10px">If the list on the next step looks wrong, you can fix the answers there.</p></div>';
+  }else{
+    var ok=imp.qs.filter(function(q){return q.a>=0;}).length,ex=imp.qs.filter(function(q){return q.x;}).length,hd=imp.qs.some(function(q){return q.d!=='u';});
+    h+='<div class="cardx" style="display:flex;flex-direction:column;gap:14px"><div class="row"><span class="chip good">'+imp.qs.length+' questions found</span><span class="chip '+(ok===imp.qs.length?'good':'warn')+'">'+ok+' with answers</span><span class="chip '+(ex===imp.qs.length?'good':'warn')+'">'+ex+' with explanations</span><span class="chip plain">'+(hd?'Difficulty found':'No difficulty labels')+'</span></div>';
+    imp.warn.forEach(function(w){h+='<div class="chip warn" style="border-radius:10px;padding:8px 12px;font-weight:600">'+esc(w)+'</div>';});
+    h+='<label for="setName" class="small muted">Name this set</label><input class="txt" id="setName" value="'+esc(imp.name)+'" maxlength="80">';
+    h+='<div class="pv">';
+    imp.qs.forEach(function(q,i){
+      h+='<div class="pv-i"><span class="n">'+(i+1)+'</span><div class="s">'+esc((q.p?q.p+' ':'')+q.q).slice(0,170)+(((q.p||'')+q.q).length>170?'…':'')+'<div class="muted small">'+q.o.length+' choices'+(q.d!=='u'?' · '+DN[q.d]:'')+(q.x?' · has explanation':'')+'</div></div><select class="ans" data-act="setAns" data-i="'+i+'" aria-label="Correct answer for question '+(i+1)+'"><option value="-1"'+(q.a<0?' selected':'')+'>Answer?</option>'+q.o.map(function(o,j){return '<option value="'+j+'"'+(q.a===j?' selected':'')+'>'+'ABCD'[j]+'</option>';}).join('')+'</select></div>';
+    });
+    h+='</div><div class="row"><button class="btn pen big" data-act="saveSet">Save this set</button><button class="btn" data-act="cancelImp">Start over</button></div></div>';
+  }
+  h+='</div>';
+  app.innerHTML=h;
+  var drop=document.getElementById('drop'),inp=document.getElementById('pdf');
+  if(inp){
+    inp.onchange=function(){if(inp.files[0])handleFile(inp.files[0]);};
+    drop.ondragover=function(e){e.preventDefault();drop.classList.add('over');};
+    drop.ondragleave=function(){drop.classList.remove('over');};
+    drop.ondrop=function(e){e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0]);};
+  }
+}
+function rawToText(raw){
+  var ls=cleanLines(raw),s='';
+  ls.forEach(function(l,i){s+=(i===0?'':(l.p?'\n\n':'\n'))+l.t;});
+  return s;
+}
+function charCount(raw){var n=0;raw.forEach(function(l){n+=String(l.t).replace(/\s/g,'').length;});return n;}
+function fail(msg,raw){imp.stage='error';imp.msg=msg;imp.qs=[];imp.warn=[];imp.rawText=raw?rawToText(raw):'';render();}
+function handleFile(f){
+  if(!/pdf$/i.test(f.name)&&f.type!=='application/pdf'){fail('Please choose a PDF file.');return;}
+  if(!window.pdfjsLib){fail('The PDF reader could not load. Check your internet connection and reload the page.');return;}
+  imp={stage:'reading',msg:'Opening your PDF\u2026',qs:[],warn:[],name:f.name.replace(/\.pdf$/i,''),rawText:''};render();
+  var used=false;
+  extractPdf(f).then(function(res){
+    used=res.ocr;
+    var r=parseDocument(res.raw);
+    if(r.questions.length||res.ocr)return {r:r,raw:res.raw};
+    setMsg('No questions were found in the PDF text. Trying to read the pages as pictures instead\u2026');
+    return ocrPdf(res.pdf).then(function(raw2){used=true;return {r:parseDocument(raw2),raw:raw2};});
+  }).then(function(o){
+    if(!o.r.questions.length){fail(o.r.warn[0]+' The reader found '+charCount(o.raw)+' characters of text.',o.raw);return;}
+    var warn=o.r.warn.slice();
+    if(used&&o.r.questions.some(function(q){return /completes the text/i.test(q.q)&&!/_{2,}/.test(q.p);}))warn.push('This PDF was read from pictures. Fill-in-the-blank passages may be missing their blank line (_____), so check the passages as you practice.');
+    imp.stage='review';imp.qs=o.r.questions;imp.warn=warn;imp.rawText='';render();
+  }).catch(function(e){fail('Something went wrong while reading the PDF: '+(e&&e.message?e.message:String(e)));});
+}
+function extractPdf(file){
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  return file.arrayBuffer().then(function(buf){
+    return pdfjsLib.getDocument({data:buf}).promise;
+  }).then(function(pdf){
+    var pages=[],chain=Promise.resolve();
+    for(var p=1;p<=pdf.numPages;p++){(function(pn){
+      chain=chain.then(function(){
+        setMsg('Checking page '+pn+' of '+pdf.numPages+'\u2026');
+        return pdf.getPage(pn).then(function(page){
+          var vh=page.getViewport({scale:1}).height;
+          return page.getTextContent().then(function(tc){pages.push(pageLines(tc.items,vh));});
+        });
+      });
+    })(p);}
+    return chain.then(function(){
+      var chars=0;pages.forEach(function(pl){pl.forEach(function(l){chars+=l.t.replace(/\s/g,'').length;});});
+      if(chars/pdf.numPages>=120)return {raw:mergePages(pages),ocr:false,pdf:pdf};
+      return ocrPdf(pdf).then(function(raw){return {raw:raw,ocr:true,pdf:pdf};});
+    });
+  });
+}
+function setMsg(m){imp.msg=m;var el=document.querySelector('.cardx .muted.small');if(el)el.textContent=m;}
+function ocrPdf(pdf){
+  if(!window.Tesseract)return Promise.reject(new Error('the picture reader could not load. Check your internet connection and reload the page'));
+  var curPage=0;
+  function logger(m){if(m&&m.status==='recognizing text')setMsg('Reading page '+curPage+' of '+pdf.numPages+' from the picture: '+Math.round(m.progress*100)+'%');}
+  function mk(opts){opts.logger=logger;return Tesseract.createWorker('eng',1,opts);}
+  setMsg('This PDF is made of pictures, so it is read like a scan. Loading the reader (first time only)\u2026');
+  return mk({}).catch(function(){
+    setMsg('Trying another source for the reader\u2026');
+    return mk({langPath:'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int'});
+  }).then(function(worker){
+    var out=[],chain=Promise.resolve();
+    for(var p=1;p<=pdf.numPages;p++){(function(pn){
+      chain=chain.then(function(){
+        curPage=pn;setMsg('Reading page '+pn+' of '+pdf.numPages+' from the picture\u2026');
+        return pdf.getPage(pn).then(function(page){
+          var vp=page.getViewport({scale:2.2}),cv=document.createElement('canvas');
+          cv.width=vp.width;cv.height=vp.height;
+          return page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise.then(function(){return worker.recognize(cv);});
+        }).then(function(res){
+          var prev='',pend=true;
+          (res.data.text||'').split('\n').forEach(function(s){
+            var t=s.trim();
+            if(!t){pend=/[.?!:"\u201d)]$/.test(prev);return;}
+            out.push({t:t.replace(/^[^A-Za-z0-9("'\u201c_]+\s*/,''),p:pend});pend=false;prev=t;
+          });
+          out.push({t:'',p:true});
+        });
+      });
+    })(p);}
+    return chain.then(function(){return worker.terminate();}).then(function(){return out;},function(e){try{worker.terminate();}catch(x){}throw e;});
+  });
+}
+function pageLines(items,vh){
+  var rows=[];
+  items.forEach(function(it){
+    if(!it.str||!it.str.trim()&&!it.hasEOL){if(!it.str)return;}
+    var x=it.transform[4],y=it.transform[5],h=Math.abs(it.transform[3])||it.height||10;
+    var row=null;
+    for(var i=rows.length-1;i>=0&&i>=rows.length-6;i--){if(Math.abs(rows[i].y-y)<=Math.max(2,h*.35)){row=rows[i];break;}}
+    if(!row){row={y:y,h:h,its:[]};rows.push(row);}
+    row.its.push({x:x,w:it.width||0,s:it.str});
+  });
+  rows.sort(function(a,b){return b.y-a.y;});
+  var lines=[],prevY=null;
+  rows.forEach(function(r){
+    r.its.sort(function(a,b){return a.x-b.x;});
+    var s='',end=null;
+    r.its.forEach(function(it){if(end!==null&&it.x-end>r.h*.18&&!/^\s/.test(it.s)&&!/\s$/.test(s))s+=' ';s+=it.s;end=it.x+it.w;});
+    lines.push({t:s,p:prevY!==null&&(prevY-r.y)>r.h*1.75,y:r.y/vh});
+    prevY=r.y;
+  });
+  return lines;
+}
+function mergePages(pages){
+  var freq={};
+  pages.forEach(function(pl){var seen={};pl.forEach(function(l){if(l.y>.07&&l.y<.93)return;var k=l.t.replace(/\d+/g,'#').trim();if(!seen[k]){seen[k]=1;freq[k]=(freq[k]||0)+1;}});});
+  var out=[];
+  pages.forEach(function(pl,pi){
+    pl.forEach(function(l,li){
+      var k=l.t.replace(/\d+/g,'#').trim();
+      if((l.y<=.07||l.y>=.93)&&pages.length>=3&&freq[k]>=3)return;
+      out.push({t:l.t,p:l.p||(li===0&&pi>0&&false)});
+    });
+  });
+  return out;
+}
+
+/* ---------- Exam ---------- */
+function chrome(day,b,innerMain,center,right,extra){
+  var h='<div class="exam"><header class="xh"><div class="xh-in pad"><div class="xh-l" style="position:relative"><div class="xh-title">Reading and Writing</div><button class="link" data-act="dir" style="text-decoration:none">Directions '+IC.down+'</button></div>';
+  h+='<div class="xh-c">'+(view.hideT?'<span class="muted">'+IC.clock+'</span>':'<div class="timer" id="timer" aria-live="off">0:00</div>')+'<button class="pill" data-act="hideT">'+(view.hideT?'Show':'Hide')+'</button></div>';
+  h+='<div class="xh-r"><button class="tool" data-act="notes">'+IC.pencil+'<span>Notes</span></button><button class="tool" data-act="exit">'+IC.exit+'<span>Save &amp; exit</span></button></div></div>';
+  if(view.dirOpen)h+='<div class="pop dir" role="dialog" aria-label="Directions"><b>Directions</b><p class="small" style="margin-top:8px">The questions in this set test reading and writing skills. Read each passage and question carefully, then choose the best answer from the four choices. Each question has one best answer. You will not see whether an answer is right until you submit the set, so use Mark for Review on anything you want to revisit.</p></div>';
+  if(view.notesOpen&&view.name==='exam'){var qi=day.qids[view.qi];h+='<div class="pop notes" role="dialog" aria-label="Notes"><b>Notes for question '+(view.qi+1)+'</b><textarea id="notesTa" data-act="notesIn" placeholder="Jot down anything that helps">'+esc(day.notes[qi]||'')+'</textarea></div>';}
+  h+='</header><div class="dash"></div>'+innerMain+'<div class="dash"></div><footer class="xf"><div class="xf-in pad"><div class="xf-l">'+esc(b.name)+'</div><div class="xf-c">'+center+'</div><div class="xf-r">'+right+'</div></div></footer>'+(extra||'')+'</div>';
+  return h;
+}
+function navGrid(day){
+  var n=day.qids.length,h='<div class="grid">';
+  for(var i=0;i<n;i++){var id=day.qids[i];h+='<button class="gq'+(day.ans[id]!==undefined?' done':'')+((view.name==='exam'&&i===view.qi)?' cur':'')+'" data-act="goq" data-i="'+i+'" aria-label="Question '+(i+1)+(day.ans[id]!==undefined?', answered':', unanswered')+(day.flag[id]?', marked for review':'')+'">'+(i+1)+(day.flag[id]?'<span class="fl">'+IC.flag+'</span>':'')+'</button>';}
+  return h+'</div>';
+}
+function legend(){return '<div class="legend"><span><i class="sw s"></i>Answered</span><span><i class="sw"></i>Unanswered</span><span style="color:var(--flag)">'+IC.flag+'For review</span></div>';}
+function renderExam(){
+  var b=B(),day=b.days[view.di],n=day.qids.length,qi=view.qi,idx=day.qids[qi],q=b.qs[idx];
+  var sel=day.ans[idx],st=day.strike[idx]||{},fl=!!day.flag[idx];
+  var m='<main class="xm'+(q.p?'':' single')+'">';
+  if(q.p)m+='<section class="pane passage" aria-label="Passage"><div class="ptxt">'+paras(q.p)+'</div></section>';
+  m+='<section class="pane qpane"><div class="qhead"><span class="qnum">'+(qi+1)+'</span><button class="mark'+(fl?' on':'')+'" data-act="flag" aria-pressed="'+fl+'">'+IC.flag+' Mark for Review</button><button class="abc'+(view.smode?' on':'')+'" data-act="smode" aria-pressed="'+!!view.smode+'" title="Cross out answer choices"><span>ABC</span></button></div>';
+  m+='<div class="qtext">'+esc(q.q)+'</div><div class="choices" role="radiogroup" aria-label="Answer choices">';
+  q.o.forEach(function(o,i){
+    m+='<div class="cw'+(st[i]?' gone':'')+'"><button class="ch'+(sel===i?' sel':'')+'" role="radio" aria-checked="'+(sel===i)+'" data-act="pick" data-i="'+i+'"><span class="l">'+'ABCD'[i]+'</span><span class="t">'+esc(o)+'</span></button>'+(view.smode?'<button class="xb" data-act="cross" data-i="'+i+'" aria-label="'+(st[i]?'Restore':'Cross out')+' choice '+'ABCD'[i]+'">'+(st[i]?'Undo':'<s>'+'ABCD'[i]+'</s>')+'</button>':'')+'</div>';
+  });
+  m+='</div></section></main>';
+  var center='<button class="qnav" data-act="nav" aria-expanded="'+!!view.navOpen+'">Question '+(qi+1)+' of '+n+' '+IC.up+'</button>';
+  if(view.navOpen)center+='<div class="pop navpop" role="dialog" aria-label="Question map"><h3>Reading and Writing questions</h3>'+legend()+navGrid(day)+'<button class="btn go" data-act="review">Go to Review Page</button></div>';
+  var right='<button class="nbtn" data-act="back"'+(qi===0?' disabled':'')+'>Back</button><button class="nbtn" data-act="next">'+(qi===n-1?'Review':'Next')+'</button>';
+  app.innerHTML=chrome(day,b,m,center,right);
+}
+function renderReview(){
+  var b=B(),day=b.days[view.di],n=day.qids.length,un=day.qids.filter(function(i){return day.ans[i]===undefined;}).length,fl=day.qids.filter(function(i){return day.flag[i];}).length;
+  var m='<main class="rv"><h1>Check Your Work</h1><p class="muted">Select a number to go back to that question. '+(un?'<b>'+un+' unanswered</b>. ':'All questions are answered. ')+(fl?fl+' marked for review. ':'')+'Once you submit, you will see the answers and explanations.</p><div class="rvbox">'+legend()+navGrid(day)+'</div></main>';
+  var right='<button class="nbtn" data-act="backToQ">Back</button><button class="nbtn" data-act="submitAsk">Submit</button>';
+  var extra='';
+  if(view.confirm)extra='<div class="modal" role="dialog" aria-label="Submit answers"><div class="box"><h3>Submit your answers?</h3><p class="muted">'+(un?un+' question'+(un===1?' is':'s are')+' unanswered and will count as incorrect. ':'')+'You cannot change answers after submitting.</p><div class="row"><button class="btn primary" data-act="submitYes">Yes, submit</button><button class="btn" data-act="submitNo">Keep working</button></div></div></div>';
+  app.innerHTML=chrome(day,b,m,'<span class="muted small">Review page</span>',right,extra);
+}
+
+/* ---------- Results ---------- */
+function renderResults(){
+  var b=S.banks[view.bi!==undefined?view.bi:S.banks.indexOf(B())],day=b.days[view.di];
+  gradeDay(b,day);
+  var n=day.qids.length,pct=day.total?Math.round(day.score/day.total*100):0;
+  var msg=pct>=90?'Excellent. Keep it up.':pct>=70?'Strong work.':pct>=50?'A solid start. The explanations below are where the learning happens.':'That is fine. Learning from the misses is the point of a daily set.';
+  var h='<div class="p-wrap pad"><header class="row between"><button class="link" data-act="home" style="text-decoration:none">← Home</button><div class="brand"><span class="mk">No. 2</span><span>Daily</span></div></header>';
+  h+='<section class="cardx score-hd"><div class="ring" style="--p:'+pct+'"><div><span><b>'+day.score+'</b><br><span class="muted small">of '+day.total+'</span></span></div></div><div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start"><span class="stamp">COMPLETED</span><h1>Day '+day.n+' score report</h1><p class="muted">'+msg+'</p><p class="muted small">'+esc(day.date||'')+' · '+fmt(day.elapsed||0)+' spent · '+esc(b.name)+'</p></div></section>';
+  h+='<section class="cardx"><h2 style="margin-bottom:4px">Answer sheet</h2><p class="muted small" style="margin-bottom:12px">Filled circle: your answer. Dashed green ring: the correct answer you missed.</p><div class="sheet">';
+  day.qids.forEach(function(id,i){
+    var q=b.qs[id],my=day.ans[id],r=q.a>=0?(my===q.a?'right':'wrong'):'';
+    h+='<div class="srow"><span class="sn">'+(i+1)+'</span>';
+    for(var j=0;j<q.o.length;j++){var c='bub';if(my===j)c+=' pick '+(q.a<0?'':r);else if(q.a===j&&my!==j)c+=' key';h+='<span class="'+c+'">'+'ABCD'[j]+'</span>';}
+    h+='<span class="res" style="color:'+(q.a<0?'var(--muted)':r==='right'?'var(--good)':'var(--bad)')+'">'+(q.a<0?'No key':r==='right'?'Correct':(my===undefined?'Skipped':'Missed'))+'</span></div>';
+  });
+  h+='</div></section>';
+  var sk={},ks=[];day.qids.forEach(function(id){var q=b.qs[id];if(q.a<0)return;if(!sk[q.t]){sk[q.t]=[0,0];ks.push(q.t);}sk[q.t][1]++;if(day.ans[id]===q.a)sk[q.t][0]++;});
+  if(ks.length>1){
+    h+='<section class="cardx"><h2 style="margin-bottom:12px">By skill</h2><div class="skills">';
+    ks.forEach(function(k){h+='<div class="sk"><span>'+esc(k)+'</span><div class="bar good"><i style="width:'+Math.round(sk[k][0]/sk[k][1]*100)+'%"></i></div><span class="muted" style="text-align:right;font-variant-numeric:tabular-nums">'+sk[k][0]+'/'+sk[k][1]+'</span></div>';});
+    h+='</div></section>';
+  }
+  h+='<div class="tabs"><button class="tab'+(view.f!=='wrong'?' on':'')+'" data-act="filt" data-f="all">All questions</button><button class="tab'+(view.f==='wrong'?' on':'')+'" data-act="filt" data-f="wrong">Missed only</button></div><div style="display:flex;flex-direction:column;gap:16px">';
+  var shown=0;
+  day.qids.forEach(function(id,i){
+    var q=b.qs[id],my=day.ans[id],ok=q.a>=0&&my===q.a;
+    if(view.f==='wrong'&&(ok||q.a<0))return;shown++;
+    h+='<article class="rq"><div class="row between"><div class="row"><b>Question '+(i+1)+'</b>'+(q.d!=='u'?'<span class="chip '+(q.d==='e'?'good':q.d==='h'?'bad':'warn')+'">'+DN[q.d]+'</span>':'')+'<span class="chip plain">'+esc(q.t)+'</span></div><span class="chip '+(q.a<0?'plain':ok?'good':'bad')+'">'+(q.a<0?'No answer key':ok?'Correct':(my===undefined?'Skipped':'Incorrect'))+'</span></div>';
+    if(q.p)h+='<div class="ptxt">'+paras(q.p)+'</div>';
+    h+='<div style="font-weight:600;max-width:65ch">'+esc(q.q)+'</div><div style="display:flex;flex-direction:column;gap:8px">';
+    q.o.forEach(function(o,j){
+      var c='ro';if(j===q.a)c+=' ok';else if(j===my)c+=' no';
+      h+='<div class="'+c+'"><span class="l">'+'ABCD'[j]+'</span><span style="overflow-wrap:anywhere">'+esc(o)+(j===q.a?' <b>(correct answer)</b>':j===my?' <b>(your answer)</b>':'')+'</span></div>';
+    });
+    h+='</div><div class="expl"><b>Explanation.</b> '+(q.x?paras(q.x):'<span class="muted">No explanation was found in your PDF for this question.</span>')+'</div></article>';
+  });
+  if(!shown)h+='<div class="cardx"><h2>No missed questions</h2><p class="muted">You got every scored question in this set right.</p></div>';
+  h+='</div><button class="btn pen big" data-act="home">Back to home</button></div>';
+  app.innerHTML=h;
+}
+
+/* ---------- Actions ---------- */
+function curDay(){var b=B();return b.days[view.di];}
+function gotoQ(i){view.qi=i;view.navOpen=false;view.name='exam';render();}
+function closePops(){view.navOpen=false;view.dirOpen=false;view.notesOpen=false;}
+function pickAns(i){
+  var day=curDay(),id=day.qids[view.qi];if(i>=B().qs[id].o.length)return;
+  day.ans[id]=i;save();render(true);
+}
+app.addEventListener('click',function(e){
+  var el=e.target.closest('[data-act]');
+  if(!el){
+    if((view.navOpen||view.dirOpen||view.notesOpen)&&!e.target.closest('.pop')){closePops();render(true);}
+    return;
+  }
+  var a=el.getAttribute('data-act'),b=B(),day,i=+el.getAttribute('data-i');
+  if(el.tagName==='SELECT'||el.tagName==='TEXTAREA')return;
+  switch(a){
+    case 'home':view={name:'home'};render();break;
+    case 'goImport':imp={stage:'idle',qs:[],warn:[],name:'',msg:''};view={name:'imp'};render();break;
+    case 'cancelImp':imp={stage:'idle',qs:[],warn:[],name:'',msg:''};render();break;
+    case 'start':if(newDay(b)){view={name:'exam',di:b.days.length-1,qi:0};render();}break;
+    case 'unlock':if(newDay(b)){view={name:'exam',di:b.days.length-1,qi:0};render();}break;
+    case 'resume':{var d=b.days[b.days.length-1],q0=0;for(var k=0;k<d.qids.length;k++){if(d.ans[d.qids[k]]===undefined){q0=k;break;}}view={name:'exam',di:b.days.length-1,qi:q0};render();break;}
+    case 'viewRes':{var bi=el.getAttribute('data-bi');view={name:'results',bi:bi!==null?+bi:S.banks.indexOf(b),di:+el.getAttribute('data-di'),f:'all'};render();break;}
+    case 'useSet':S.active=el.getAttribute('data-id');save();render();break;
+    case 'rm':view.rm=el.getAttribute('data-id');render(true);break;
+    case 'rmNo':view.rm=null;render(true);break;
+    case 'rmYes':S.banks=S.banks.filter(function(x){return x.id!==el.getAttribute('data-id');});if(!S.banks.length)S.active=null;else if(!S.banks.some(function(x){return x.id===S.active;}))S.active=S.banks[0].id;save();view={name:'home'};render();break;
+    case 'parsePaste':{var ta=document.getElementById('pasteTa');var raw=ta.value.split('\n').map(function(s){return {t:s,p:s.trim()===''};});var r=parseDocument(raw);
+      if(!r.questions.length){imp={stage:'error',msg:r.warn[0],qs:[],warn:[]};}else{imp={stage:'review',qs:r.questions,warn:r.warn,name:'Pasted set',msg:''};}render();break;}
+    case 'saveSet':{var nm=(document.getElementById('setName').value||'My set').trim()||'My set';
+      var id='s'+Date.now();S.banks.push({id:id,name:nm,qs:imp.qs,days:[]});S.active=id;save();imp={stage:'idle',qs:[],warn:[],name:'',msg:''};view={name:'home'};render();break;}
+    case 'dir':view.dirOpen=!view.dirOpen;view.notesOpen=false;view.navOpen=false;render(true);break;
+    case 'notes':if(view.name==='exam'){view.notesOpen=!view.notesOpen;view.dirOpen=false;view.navOpen=false;render(true);}break;
+    case 'hideT':view.hideT=!view.hideT;render(true);break;
+    case 'exit':closePops();save();view={name:'home'};render();break;
+    case 'nav':view.navOpen=!view.navOpen;view.dirOpen=false;view.notesOpen=false;render(true);break;
+    case 'goq':gotoQ(i);break;
+    case 'review':closePops();view.name='review';render();break;
+    case 'pick':pickAns(i);break;
+    case 'smode':view.smode=!view.smode;render(true);break;
+    case 'cross':{day=curDay();var id=day.qids[view.qi];day.strike[id]=day.strike[id]||{};if(day.strike[id][i])delete day.strike[id][i];else day.strike[id][i]=true;save();render(true);break;}
+    case 'flag':{day=curDay();var fid=day.qids[view.qi];if(day.flag[fid])delete day.flag[fid];else day.flag[fid]=true;save();render(true);break;}
+    case 'next':closePops();if(view.qi<curDay().qids.length-1){view.qi++;render();}else{view.name='review';render();}break;
+    case 'back':closePops();if(view.qi>0){view.qi--;render();}break;
+    case 'backToQ':view.name='exam';view.qi=curDay().qids.length-1;render();break;
+    case 'submitAsk':view.confirm=true;render(true);break;
+    case 'submitNo':view.confirm=false;render(true);break;
+    case 'submitYes':{day=curDay();gradeDay(b,day);day.done=true;day.date=today();save();view={name:'results',bi:S.banks.indexOf(b),di:view.di,f:'all'};render();break;}
+    case 'filt':view.f=el.getAttribute('data-f');render(true);break;
+  }
+});
+app.addEventListener('change',function(e){
+  var el=e.target;
+  if(el.getAttribute&&el.getAttribute('data-act')==='setAns'){imp.qs[+el.getAttribute('data-i')].a=+el.value;}
+});
+app.addEventListener('input',function(e){
+  var el=e.target;
+  if(el.id==='notesTa'){var day=curDay(),id=day.qids[view.qi];day.notes[id]=el.value;save();}
+  if(el.id==='setName'){imp.name=el.value;}
+});
+document.addEventListener('keydown',function(e){
+  var tag=(e.target.tagName||'').toLowerCase();
+  if(tag==='textarea'||tag==='input'||tag==='select')return;
+  if(e.key==='Escape'&&(view.navOpen||view.dirOpen||view.notesOpen)){closePops();render(true);return;}
+  if(view.name!=='exam'||e.ctrlKey||e.metaKey||e.altKey)return;
+  var k=e.key.toLowerCase(),map={'1':0,'2':1,'3':2,'4':3,'a':0,'b':1,'c':2,'d':3};
+  if(map[k]!==undefined)pickAns(map[k]);
+  else if(k==='arrowright'){closePops();var n=curDay().qids.length;if(view.qi<n-1){view.qi++;render();}else{view.name='review';render();}}
+  else if(k==='arrowleft'){closePops();if(view.qi>0){view.qi--;render();}}
+});
+window.addEventListener('pagehide',save);
+render();
+</script>
+</body>
+</html>
